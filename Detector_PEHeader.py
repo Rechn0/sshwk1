@@ -10,7 +10,6 @@ import re
 
 import numpy
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.feature_extraction import FeatureHasher
 
 import pefile
 
