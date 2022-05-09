@@ -15,29 +15,22 @@ from sklearn.feature_extraction import FeatureHasher
 import pefile
 
 
-def get_IAT_features(path,hasher):
+def get_PEHeader_features(path):
 
-	IAT_features = {}
+	PEHeader_features = []
 	try:
 		pe = pefile.PE(path)
 	except:
 		print(path)
 		pass
 	
-	if hasattr(pe,'DIRECTORY_ENTRY_IMPORT'):
-    	for it in pe.DIRECTORY_ENTRY_IMPORT:
-			for func in it.imports:
-                IAT_features[func.name.decode()] = 1
+	if hasattr(pe,'OPTIONAL_HEADER'):
+		now = pe.OPTIONAL_HEADER
+		for it in now.__keys__:
+			PEHeader_features += [now.__getattribute__(it[0])]
+	print("Extracted {0} PE Headers from {1}".format(len(PEHeader_features),path))
 	
-	# hash the features using the hashing trick
-    hashed_features = hasher.transform([IAT_features])
-
-    # do some data munging to get the feature array
-    hashed_features = hashed_features.todense()
-    hashed_features = numpy.asarray(hashed_features)
-    hashed_features = hashed_features[0]
-    print("Extracted {0} function names from {1}".format(len(IAT_features),path))
-    return hashed_features
+	return PEHeader_features
 
 def scan_file(path):
     # scan a file to determine if it is malicious or benign
@@ -45,8 +38,8 @@ def scan_file(path):
         print("It appears you haven't trained a detector yet!  Do this before scanning files.")
         sys.exit(1)
     with open("saved_detector.pkl","rb") as saved_detector:
-        classifier, hasher = pickle.load(saved_detector)
-    features = get_IAT_features(path,hasher)
+        classifier = pickle.load(saved_detector)
+    features = get_PEHeader_features(path)
     result_proba = classifier.predict_proba([features])[:,1]
     # if the user specifies malware_paths and benignware_paths, train a detector
     if result_proba > 0.5:
@@ -54,7 +47,7 @@ def scan_file(path):
     else:
         print("It appears this file is benign.",result_proba)
 
-def train_detector(benign_path,malicious_path,hasher):
+def train_detector(benign_path,malicious_path):
     # train the detector on the specified training data
     def get_training_paths(directory):
         targets = []
@@ -64,16 +57,16 @@ def train_detector(benign_path,malicious_path,hasher):
     malicious_paths = get_training_paths(malicious_path)
     benign_paths = get_training_paths(benign_path)
     print("Begin Training...")
-    X = [get_IAT_features(path,hasher) for path in malicious_paths + benign_paths]
+    X = [get_PEHeader_features(path) for path in malicious_paths + benign_paths]
     y = [1 for i in range(len(malicious_paths))] + [0 for i in range(len(benign_paths))]
     classifier = RandomForestClassifier(64)
     classifier.fit(X,y)
     print("End Training...")
     print("Begin Saving Models...")
-    pickle.dump((classifier,hasher),open("saved_detector.pkl","wb+"))
+    pickle.dump(classifier,open("saved_detector.pkl","wb+"))
     print("End Saving Models...")
 
-def cv_evaluate(X,y,hasher):
+def cv_evaluate(X,y):
     # use cross-validation to evaluate our model
     import random
     from sklearn import metrics
@@ -103,7 +96,7 @@ def cv_evaluate(X,y,hasher):
     pyplot.grid()
     pyplot.show()
 
-def get_training_data(benign_path,malicious_path,hasher):
+def get_training_data(benign_path,malicious_path):
     def get_training_paths(directory):
         targets = []
         for path in os.listdir(directory):
@@ -111,7 +104,7 @@ def get_training_data(benign_path,malicious_path,hasher):
         return targets
     malicious_paths = get_training_paths(malicious_path)
     benign_paths = get_training_paths(benign_path)
-    X = [get_IAT_features(path,hasher) for path in malicious_paths + benign_paths]
+    X = [get_PEHeader_features(path) for path in malicious_paths + benign_paths]
     y = [1 for i in range(len(malicious_paths))] + [0 for i in range(len(benign_paths))]
     return X, y
 
@@ -125,15 +118,15 @@ def main():
 
     args = parser.parse_args()
 
-    hasher = FeatureHasher(1000)
+    # hasher = FeatureHasher(20000)
 
     if args.scan_file_path:
         scan_file(args.scan_file_path)
     elif args.malware_paths and args.benignware_paths and not args.evaluate:
-        train_detector(args.benignware_paths,args.malware_paths,hasher)
+        train_detector(args.benignware_paths,args.malware_paths)
     elif args.malware_paths and args.benignware_paths and args.evaluate:
-        X, y = get_training_data(args.benignware_paths,args.malware_paths,hasher)
-        cv_evaluate(X,y,hasher)
+        X, y = get_training_data(args.benignware_paths,args.malware_paths)
+        cv_evaluate(X,y)
     else:
         print("[*] You did not specify a path to scan," \
             " nor did you specify paths to malicious and benign training files" \
